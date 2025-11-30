@@ -59,8 +59,23 @@ export async function POST(request: NextRequest) {
     }
   );
 
-  // Build redirect URL using frozen origin
-  const redirectUrl = `${authRequest.frozenOrigin}${AUTH_CALLBACK_PATH}?request_id=${requestId}&claim=${claimToken}`;
+  // Get the current origin (Alt Auth's own URL)
+  const altAuthOrigin = request.nextUrl.origin;
+
+  // Check if the user came directly to Alt Auth (not from an external site)
+  const isDirectLogin = authRequest.frozenOrigin === altAuthOrigin;
+
+  // Build redirect URL
+  let redirectUrl: string;
+  if (isDirectLogin) {
+    // User logged in directly to Alt Auth, redirect to profile page
+    redirectUrl = `${altAuthOrigin}/profile`;
+    // Clean up the auth request since we won't need claim verification
+    await db.collection("auth_requests").deleteOne({ requestId });
+  } else {
+    // User came from external site, redirect back with claim token
+    redirectUrl = `${authRequest.frozenOrigin}${AUTH_CALLBACK_PATH}?request_id=${requestId}&claim=${claimToken}`;
+  }
 
   // Generate session token for the Alt Auth domain
   const sessionToken = generateSessionToken(userId, user.email);
