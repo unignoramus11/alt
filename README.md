@@ -45,25 +45,25 @@ Alt Auth will be available at `http://localhost:3000`.
 alt/
 ├── app/
 │   ├── api/auth/
-│   │   ├── init/           # Initialize auth request with referrer
-│   │   ├── check-user/     # Check if user exists, has password
-│   │   ├── send-otp/       # Generate and send OTP email
-│   │   ├── verify-otp/     # Verify OTP, create user if new
+│   │   ├── init/             # Initialize auth request with referrer
+│   │   ├── check-user/       # Check if user exists, has password
+│   │   ├── send-otp/         # Generate and send OTP email
+│   │   ├── verify-otp/       # Verify OTP, create user if new
 │   │   ├── complete-profile/ # Save profile (username, etc.)
-│   │   ├── finalize/       # Generate claim token, redirect URL
-│   │   ├── verify-claim/   # Server-to-server claim verification
-│   │   ├── session/        # Check current session status
-│   │   └── logout/         # Clear session cookie
-│   ├── api/profile/        # GET/PUT profile for logged-in users
-│   ├── login/              # Login UI with step-by-step flow
-│   │   └── components/     # EmailStep, OTPStep, PasswordStep, ProfileStep
-│   └── profile/            # Profile management page
+│   │   ├── finalize/         # Generate claim token, redirect URL
+│   │   ├── verify-claim/     # Server-to-server claim verification
+│   │   ├── session/          # Check current session status
+│   │   └── logout/           # Clear session cookie
+│   ├── api/profile/          # GET/PUT profile for logged-in users
+│   ├── login/                # Login UI with step-by-step flow
+│   │   └── components/       # EmailStep, OTPStep, PasswordStep, ProfileStep
+│   └── profile/              # Profile management page
 ├── lib/
-│   ├── constants.ts        # Colors, session config, branches, batches
-│   ├── auth.ts             # Token generation, password hashing, JWT
-│   ├── db.ts               # MongoDB connection
-│   └── email.ts            # SMTP email sending
-└── example-site/           # Demo integration site (port 3001)
+│   ├── constants.ts          # Colors, session config, branches, batches
+│   ├── auth.ts               # Token generation, password hashing, JWT
+│   ├── db.ts                 # MongoDB connection
+│   └── email.ts              # SMTP email sending
+└── example-site/             # Demo integration site (port 3001)
 ```
 
 ## Environment Variables
@@ -115,39 +115,39 @@ alt/
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  External Site  │     │    Alt Auth     │     │    MongoDB      │
+│  External Site     │     │      Alt Auth       │     │      MongoDB       │
 └────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-         │                       │                       │
-         │ 1. Set state cookie   │                       │
-         │ 2. Redirect to /login │                       │
-         │──────────────────────>│                       │
-         │                       │                       │
-         │                       │ 3. Capture referrer   │
-         │                       │ 4. Create auth_request│
-         │                       │──────────────────────>│
-         │                       │                       │
-         │                       │ 5. User authenticates │
-         │                       │    (email/OTP/profile)│
-         │                       │                       │
-         │                       │ 6. Generate claim     │
-         │                       │──────────────────────>│
-         │                       │                       │
-         │ 7. Redirect to        │                       │
-         │    /auth-callback     │                       │
-         │<──────────────────────│                       │
-         │                       │                       │
-         │ 8. Verify claim       │                       │
-         │   (server-to-server)  │                       │
-         │──────────────────────>│                       │
-         │                       │ 9. Delete auth_request│
-         │                       │──────────────────────>│
-         │                       │                       │
-         │ 10. Return profile    │                       │
-         │<──────────────────────│                       │
-         │                       │                       │
-         │ 11. Set session,      │                       │
-         │     redirect user     │                       │
-         └───────────────────────┴───────────────────────┘
+           │                          │                           │
+           │ 1. Set state cookie      │                           │
+           │ 2. Redirect to /login    │                           │
+           │─────────────────────>│                           │
+           │                          │                           │
+           │                          │ 3. Capture referrer       │
+           │                          │ 4. Create auth_request    │
+           │                          │──────────────────────>│
+           │                          │                           │
+           │                          │ 5. User authenticates     │
+           │                          │    (email/OTP/profile)    │
+           │                          │                           │
+           │                          │ 6. Generate claim         │
+           │                          │──────────────────────>│
+           │                          │                           │
+           │ 7. Redirect to           │                           │
+           │    /auth-callback        │                           │
+           │<─────────────────────│                           │
+           │                          │                           │
+           │ 8. Verify claim          │                           │
+           │   (server-to-server)     │                           │
+           │─────────────────────>│                           │
+           │                          │ 9. Delete auth_request.   │
+           │                          │──────────────────────>│
+           │                          │                           │
+           │ 10. Return profile       │                           │
+           │<─────────────────────│                           │
+           │                          │                           │
+           │ 11. Set session,         │                           │
+           │     redirect user        │                           │
+           └──────────────────────┴───────────────────────┘
 ```
 
 ## Security Model
