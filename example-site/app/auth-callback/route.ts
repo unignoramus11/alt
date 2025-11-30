@@ -1,34 +1,33 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { ALT_AUTH_URL } from "@/lib/config";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const request_id = searchParams.get("request_id");
   const claim = searchParams.get("claim");
+  const baseUrl = request.nextUrl.origin;
 
   // Get stored state from cookie
   const cookieStore = await cookies();
   const stateCookie = cookieStore.get("alt_auth_state");
 
   if (!stateCookie?.value || !request_id || !claim) {
-    redirect("/?error=invalid_callback");
+    return NextResponse.redirect(new URL("/?error=invalid_callback", baseUrl));
   }
 
   let state;
   try {
     state = JSON.parse(stateCookie.value);
   } catch {
-    redirect("/?error=invalid_state");
+    return NextResponse.redirect(new URL("/?error=invalid_state", baseUrl));
   }
 
   if (!state.nonce) {
-    redirect("/?error=missing_nonce");
+    return NextResponse.redirect(new URL("/?error=missing_nonce", baseUrl));
   }
 
   // Verify claim with Alt Auth server
-  const origin = request.nextUrl.origin;
   const response = await fetch(`${ALT_AUTH_URL}/api/auth/verify-claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -36,27 +35,34 @@ export async function GET(request: NextRequest) {
       requestId: request_id,
       claimToken: claim,
       nonce: state.nonce,
-      origin,
+      origin: baseUrl,
     }),
   });
 
   const data = await response.json();
 
   if (!data.success) {
-    redirect("/?error=auth_failed");
+    return NextResponse.redirect(new URL("/?error=auth_failed", baseUrl));
   }
 
-  // Store user data in cookie (in production, use a proper session)
-  cookieStore.set("user_session", JSON.stringify(data.profile), {
+  // Create redirect response
+  const redirectUrl = new URL(state.redirectUrl || "/dashboard", baseUrl);
+  const res = NextResponse.redirect(redirectUrl);
+
+  // Store user data in cookie
+  res.cookies.set("user_session", JSON.stringify(data.profile), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    sameSite: "lax",
     maxAge: data.sessionDurationMs / 1000,
+    path: "/",
   });
 
   // Clear auth state cookie
-  cookieStore.delete("alt_auth_state");
+  res.cookies.set("alt_auth_state", "", {
+    maxAge: 0,
+    path: "/",
+  });
 
-  // Redirect to dashboard
-  redirect(state.redirectUrl || "/dashboard");
+  return res;
 }

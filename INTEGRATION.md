@@ -2,6 +2,17 @@
 
 Complete guide for integrating Alt Auth into your website.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start-nextjs-app-router)
+- [Step-by-Step Implementation](#step-by-step-implementation)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Security Model](#security-model)
+- [Framework Examples](#framework-examples)
+- [Troubleshooting](#troubleshooting)
+
 ## Overview
 
 Alt Auth provides authentication for any website without requiring:
@@ -10,27 +21,90 @@ Alt Auth provides authentication for any website without requiring:
 - API keys or shared secrets
 - Backend configuration on Alt Auth's side
 
-Security is based on browser same-origin guarantees and server-to-server verification.
+### How It Works
+
+1. Your site stores a nonce in a cookie and redirects to Alt Auth
+2. User authenticates on Alt Auth (email → OTP → profile)
+3. Alt Auth redirects back to your `/auth-callback` with a one-time claim token
+4. Your server verifies the claim and receives the user profile
+
+### Key Concepts
+
+| Term         | Description                                                           |
+| ------------ | --------------------------------------------------------------------- |
+| **Nonce**    | Random string you generate and store in a cookie before redirect      |
+| **Claim**    | One-time token Alt Auth gives you after successful authentication     |
+| **Origin**   | Your site's URL (e.g., `https://example.com`), captured from referrer |
+| **Callback** | Your `/auth-callback` route that handles the redirect from Alt Auth   |
+
+---
 
 ## Quick Start (Next.js App Router)
 
-### Step 1: Create Login Button
+### Prerequisites
+
+- Next.js 14+ with App Router
+- Environment variable for Alt Auth URL
+
+### Files to Create
+
+```
+your-app/
+├── app/
+│   ├── page.tsx              # Login button
+│   ├── auth-callback/
+│   │   └── route.ts          # Callback handler (Route Handler)
+│   ├── dashboard/
+│   │   ├── page.tsx          # Protected page
+│   │   └── LogoutButton.tsx  # Logout component
+│   └── api/
+│       └── logout/
+│           └── route.ts      # Logout API
+└── lib/
+    └── config.ts             # Alt Auth URL config
+```
+
+---
+
+## Step-by-Step Implementation
+
+### Step 1: Configuration
+
+Create a config file for the Alt Auth URL:
+
+```typescript
+// lib/config.ts
+export const ALT_AUTH_URL =
+  process.env.NEXT_PUBLIC_ALT_AUTH_URL || "http://localhost:3000";
+```
+
+Add to your `.env.local`:
+
+```bash
+NEXT_PUBLIC_ALT_AUTH_URL=https://alt-osdg.vercel.app
+```
+
+---
+
+### Step 2: Login Button
+
+Create a login button that stores state and redirects to Alt Auth:
 
 ```tsx
-// app/page.tsx (or wherever you want the login button)
+// app/page.tsx
 "use client";
 
-const ALT_AUTH_URL = "https://your-alt-auth-domain.com";
+import { ALT_AUTH_URL } from "@/lib/config";
 
 export default function Home() {
   const handleLogin = () => {
     // Generate a random nonce for security
     const nonce = crypto.randomUUID();
 
-    // Where to redirect after login
+    // Where to redirect after successful login
     const redirectUrl = "/dashboard";
 
-    // Store state in a same-site cookie (only your origin can read this)
+    // Store state in a cookie (SameSite=Lax allows cross-site redirects)
     document.cookie = `alt_auth_state=${JSON.stringify({
       nonce,
       redirectUrl,
@@ -40,43 +114,60 @@ export default function Home() {
     window.location.href = `${ALT_AUTH_URL}/login`;
   };
 
-  return <button onClick={handleLogin}>Login with Alt Auth</button>;
+  return (
+    <div>
+      <h1>Welcome</h1>
+      <button onClick={handleLogin}>Login with Alt Auth</button>
+    </div>
+  );
 }
 ```
 
-### Step 2: Create Callback Route Handler
+**Important:** Use `SameSite=Lax`, not `SameSite=Strict`. Strict cookies are not sent on cross-site redirects, which would break the callback.
+
+---
+
+### Step 3: Callback Route Handler
+
+Create a Route Handler (not a page) to handle the callback. This is critical because:
+
+1. Route Handlers can modify cookies on the response
+2. They run server-side, keeping the verification secure
 
 ```typescript
 // app/auth-callback/route.ts
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import { NextRequest } from "next/server";
-
-const ALT_AUTH_URL = "https://your-alt-auth-domain.com";
+import { NextRequest, NextResponse } from "next/server";
+import { ALT_AUTH_URL } from "@/lib/config";
 
 export async function GET(request: NextRequest) {
+  // Get query parameters from Alt Auth redirect
   const searchParams = request.nextUrl.searchParams;
   const request_id = searchParams.get("request_id");
   const claim = searchParams.get("claim");
 
-  // Get your stored state
+  // Get our origin for redirects and verification
+  const baseUrl = request.nextUrl.origin;
+
+  // Read the state cookie we set before redirecting
   const cookieStore = await cookies();
   const stateCookie = cookieStore.get("alt_auth_state");
 
+  // Validate we have all required data
   if (!stateCookie?.value || !request_id || !claim) {
-    redirect("/?error=invalid_callback");
+    return NextResponse.redirect(new URL("/?error=invalid_callback", baseUrl));
   }
 
-  // Parse the state
+  // Parse the stored state
   let state;
   try {
     state = JSON.parse(stateCookie.value);
   } catch {
-    redirect("/?error=invalid_state");
+    return NextResponse.redirect(new URL("/?error=invalid_state", baseUrl));
   }
 
   if (!state.nonce) {
-    redirect("/?error=missing_nonce");
+    return NextResponse.redirect(new URL("/?error=missing_nonce", baseUrl));
   }
 
   // Verify the claim with Alt Auth (server-to-server)
@@ -87,44 +178,123 @@ export async function GET(request: NextRequest) {
       requestId: request_id,
       claimToken: claim,
       nonce: state.nonce,
-      origin: "https://your-site.com", // Your site's origin
+      origin: baseUrl, // Must match the origin Alt Auth captured
     }),
   });
 
   const data = await response.json();
 
   if (!data.success) {
-    redirect("/?error=auth_failed");
+    return NextResponse.redirect(new URL("/?error=auth_failed", baseUrl));
   }
 
-  // data.profile contains the user info:
-  // {
-  //   id: "user-id",
-  //   email: "user@example.com",
-  //   username: "johndoe",
-  //   rollNumber: "12345",
-  //   batch: "2024",
-  //   branch: "CSD",
-  //   profileCompleted: true
-  // }
+  // SUCCESS! Create redirect response to the user's destination
+  const redirectUrl = new URL(state.redirectUrl || "/dashboard", baseUrl);
+  const res = NextResponse.redirect(redirectUrl);
 
-  // Store session however you prefer (cookie, database, etc.)
-  cookieStore.set("user_session", JSON.stringify(data.profile), {
+  // Store the user profile in a session cookie
+  res.cookies.set("user_session", JSON.stringify(data.profile), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-    maxAge: data.sessionDurationMs / 1000,
+    sameSite: "lax",
+    maxAge: data.sessionDurationMs / 1000, // Convert ms to seconds
+    path: "/",
   });
 
-  // Clear the auth state cookie
-  cookieStore.delete("alt_auth_state");
+  // Clear the auth state cookie (no longer needed)
+  res.cookies.set("alt_auth_state", "", {
+    maxAge: 0,
+    path: "/",
+  });
 
-  // Redirect to the original destination
-  redirect(state.redirectUrl || "/dashboard");
+  return res;
 }
 ```
 
-### Step 3: Create Logout Route
+**Why Route Handler instead of Page Component?**
+
+Using `redirect()` from `next/navigation` in a page component with cookie modifications can cause issues where cookies are set but redirect doesn't happen. `NextResponse.redirect()` in a Route Handler works reliably.
+
+---
+
+### Step 4: Protected Dashboard Page
+
+```tsx
+// app/dashboard/page.tsx
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import LogoutButton from "./LogoutButton";
+
+interface UserProfile {
+  id: string;
+  email: string;
+  username?: string;
+  rollNumber?: string;
+  batch?: string;
+  branch?: string;
+}
+
+export default async function Dashboard() {
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("user_session");
+
+  // Redirect to home if not logged in
+  if (!sessionCookie?.value) {
+    redirect("/");
+  }
+
+  let user: UserProfile;
+  try {
+    user = JSON.parse(sessionCookie.value);
+  } catch {
+    redirect("/");
+  }
+
+  return (
+    <div>
+      <h1>Welcome, {user.username || user.email}!</h1>
+
+      <div>
+        <p>Email: {user.email}</p>
+        {user.rollNumber && <p>Roll Number: {user.rollNumber}</p>}
+        {user.batch && <p>Batch: {user.batch}</p>}
+        {user.branch && <p>Branch: {user.branch}</p>}
+      </div>
+
+      <LogoutButton />
+    </div>
+  );
+}
+```
+
+---
+
+### Step 5: Logout Button Component
+
+```tsx
+// app/dashboard/LogoutButton.tsx
+"use client";
+
+import { useRouter } from "next/navigation";
+
+export default function LogoutButton() {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    // Call the logout API to clear the httpOnly cookie
+    await fetch("/api/logout", { method: "POST" });
+    router.push("/");
+  };
+
+  return <button onClick={handleLogout}>Logout</button>;
+}
+```
+
+**Important:** You cannot delete httpOnly cookies from client-side JavaScript. You must use a server-side API route.
+
+---
+
+### Step 6: Logout API Route
 
 ```typescript
 // app/api/logout/route.ts
@@ -134,10 +304,11 @@ import { NextResponse } from "next/server";
 export async function POST() {
   const cookieStore = await cookies();
 
+  // Clear the session cookie
   cookieStore.set("user_session", "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    sameSite: "lax",
     maxAge: 0,
     path: "/",
   });
@@ -146,82 +317,32 @@ export async function POST() {
 }
 ```
 
-### Step 4: Use Session in Pages
+---
 
-```typescript
-// app/dashboard/page.tsx
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+## Configuration
 
-export default async function Dashboard() {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get("user_session");
+### Environment Variables
 
-  if (!sessionCookie?.value) {
-    redirect("/");
-  }
+| Variable                   | Description         | Example                       |
+| -------------------------- | ------------------- | ----------------------------- |
+| `NEXT_PUBLIC_ALT_AUTH_URL` | Alt Auth server URL | `https://alt-osdg.vercel.app` |
 
-  const user = JSON.parse(sessionCookie.value);
+### Cookie Configuration
 
-  return (
-    <div>
-      <h1>Welcome, {user.username}!</h1>
-      <p>Email: {user.email}</p>
-      {user.rollNumber && <p>Roll Number: {user.rollNumber}</p>}
-      {user.batch && <p>Batch: {user.batch}</p>}
-      {user.branch && <p>Branch: {user.branch}</p>}
-    </div>
-  );
-}
-```
+| Cookie           | Purpose                        | Attributes               |
+| ---------------- | ------------------------------ | ------------------------ |
+| `alt_auth_state` | Stores nonce before redirect   | `path=/; SameSite=Lax`   |
+| `user_session`   | Stores user profile after auth | `httpOnly; SameSite=Lax` |
 
-## Authentication Flow Diagram
-
-```
-Your Site                          Alt Auth                         User
-   │                                  │                               │
-   │  1. User clicks "Login"          │                               │
-   │  ───────────────────────────────>│                               │
-   │  (Set state cookie, redirect)    │                               │
-   │                                  │                               │
-   │                                  │  2. Show login page           │
-   │                                  │<──────────────────────────────│
-   │                                  │                               │
-   │                                  │  3. Enter email               │
-   │                                  │<──────────────────────────────│
-   │                                  │                               │
-   │                                  │  4. Send OTP email            │
-   │                                  │──────────────────────────────>│
-   │                                  │                               │
-   │                                  │  5. Enter OTP                 │
-   │                                  │<──────────────────────────────│
-   │                                  │                               │
-   │                                  │  6. Complete profile          │
-   │                                  │  (if new user)                │
-   │                                  │<──────────────────────────────│
-   │                                  │                               │
-   │  7. Redirect to /auth-callback   │                               │
-   │<─────────────────────────────────│                               │
-   │  (with request_id & claim)       │                               │
-   │                                  │                               │
-   │  8. Verify claim (server-side)   │                               │
-   │─────────────────────────────────>│                               │
-   │                                  │                               │
-   │  9. Return user profile          │                               │
-   │<─────────────────────────────────│                               │
-   │                                  │                               │
-   │  10. Set session, redirect       │                               │
-   │──────────────────────────────────────────────────────────────────>│
-   │                                  │                               │
-```
+---
 
 ## API Reference
 
 ### POST /api/auth/verify-claim
 
-Verify a claim token and retrieve user profile. This should be called server-side only.
+Verify a claim token and retrieve the user profile. **Call this server-side only.**
 
-**Request:**
+#### Request
 
 ```json
 {
@@ -232,7 +353,7 @@ Verify a claim token and retrieve user profile. This should be called server-sid
 }
 ```
 
-**Success Response (200):**
+#### Success Response (200)
 
 ```json
 {
@@ -252,7 +373,7 @@ Verify a claim token and retrieve user profile. This should be called server-sid
 }
 ```
 
-**Error Response (400/403):**
+#### Error Response (400)
 
 ```json
 {
@@ -260,52 +381,60 @@ Verify a claim token and retrieve user profile. This should be called server-sid
 }
 ```
 
-## User Profile Fields
+### User Profile Fields
 
-| Field              | Type    | Description                              |
-| ------------------ | ------- | ---------------------------------------- |
-| `id`               | string  | Unique user ID (MongoDB ObjectId)        |
-| `email`            | string  | User's verified email address            |
-| `username`         | string  | User's chosen display name               |
-| `rollNumber`       | string? | Optional roll/student number             |
-| `batch`            | string? | Optional batch year (2020-2027)          |
-| `branch`           | string? | Optional branch (CSD, CSE, ECE, etc.)    |
-| `profileCompleted` | boolean | Whether user has completed their profile |
+| Field              | Type      | Required | Description                       |
+| ------------------ | --------- | -------- | --------------------------------- |
+| `id`               | `string`  | Yes      | Unique user ID (MongoDB ObjectId) |
+| `email`            | `string`  | Yes      | Verified email address            |
+| `username`         | `string`  | Yes      | Display name                      |
+| `rollNumber`       | `string`  | No       | Student/roll number               |
+| `batch`            | `string`  | No       | Batch year (2020-2027)            |
+| `branch`           | `string`  | No       | Branch (CSD, CSE, ECE, etc.)      |
+| `profileCompleted` | `boolean` | Yes      | Whether profile setup is complete |
 
-## Security Considerations
+---
+
+## Security Model
 
 ### Why This Is Secure
 
-1. **Origin Binding**: When the user is redirected to Alt Auth, the browser sends a `Referer` header. Alt Auth captures this and stores it with the auth request. The claim can only be verified if the origin matches.
+1. **Origin Binding**
 
-2. **Same-Site Cookies**: Your `alt_auth_state` cookie uses `SameSite=Lax`, meaning only your origin can read the nonce. This allows the cookie to be sent on top-level redirects back from Alt Auth while still preventing CSRF attacks.
+   - Alt Auth captures `document.referrer` when the user arrives
+   - This origin is stored with the auth request
+   - Claim verification fails if the origin doesn't match
 
-3. **One-Time Claims**: Claim tokens are deleted after use. They cannot be replayed.
+2. **Same-Site Cookies**
 
-4. **Server-to-Server Verification**: The claim is verified server-side. Client-side JavaScript cannot forge this.
+   - Your `alt_auth_state` cookie uses `SameSite=Lax`
+   - Only your origin can read the nonce
+   - Attackers cannot steal or forge your nonce
 
-5. **Short Expiry**: Claim tokens expire in 5 minutes. Auth requests expire in 30 minutes.
+3. **One-Time Claims**
 
-### Best Practices
+   - Claim tokens are deleted after use
+   - Cannot be replayed
+   - Expire after 5 minutes if unused
 
-- Always use HTTPS in production
-- Store the session securely (httpOnly cookies recommended)
-- Validate the origin in your callback matches your site
-- Don't expose the claim token in client-side code
+4. **Server-to-Server Verification**
 
-## Session Management
+   - Claims are verified via server-side API call
+   - Client-side JavaScript cannot forge verification
 
-Alt Auth returns a suggested session duration (7 days by default). You can:
+5. **No Shared Secrets**
+   - No API keys to leak
+   - Security relies on browser origin guarantees
 
-1. **Use the suggested duration**: Set your cookie `maxAge` to `sessionDurationMs / 1000`
-2. **Use your own duration**: Ignore `sessionDurationMs` and set your own expiry
-3. **Use the session token**: Alt Auth provides a JWT token you can use directly
+### Session Persistence
 
-### Re-authentication
+If a user has an active session on Alt Auth (within 7 days), they will be automatically redirected back to your site without re-authenticating. This provides seamless SSO-like behavior.
 
-If a user has logged in to Alt Auth recently (within 7 days), they will be automatically redirected back without re-entering credentials. This provides a seamless experience for returning users.
+---
 
-## Express.js Example
+## Framework Examples
+
+### Express.js
 
 ```javascript
 const express = require("express");
@@ -315,11 +444,13 @@ const app = express();
 app.use(cookieParser());
 app.use(express.json());
 
-const ALT_AUTH_URL = "https://your-alt-auth-domain.com";
+const ALT_AUTH_URL = "https://alt-osdg.vercel.app";
+const YOUR_ORIGIN = "http://localhost:3001";
 
-// Login page
+// Home page with login
 app.get("/", (req, res) => {
   res.send(`
+    <h1>Express Example</h1>
     <button onclick="login()">Login with Alt Auth</button>
     <script>
       function login() {
@@ -337,12 +468,20 @@ app.get("/", (req, res) => {
 // Callback handler
 app.get("/auth-callback", async (req, res) => {
   const { request_id, claim } = req.query;
-  const state = JSON.parse(req.cookies.alt_auth_state || "{}");
+  const stateCookie = req.cookies.alt_auth_state;
 
-  if (!state.nonce || !request_id || !claim) {
-    return res.redirect("/?error=invalid");
+  if (!stateCookie || !request_id || !claim) {
+    return res.redirect("/?error=invalid_callback");
   }
 
+  let state;
+  try {
+    state = JSON.parse(stateCookie);
+  } catch {
+    return res.redirect("/?error=invalid_state");
+  }
+
+  // Verify with Alt Auth
   const response = await fetch(`${ALT_AUTH_URL}/api/auth/verify-claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -350,7 +489,7 @@ app.get("/auth-callback", async (req, res) => {
       requestId: request_id,
       claimToken: claim,
       nonce: state.nonce,
-      origin: "http://localhost:3001",
+      origin: YOUR_ORIGIN,
     }),
   });
 
@@ -364,6 +503,7 @@ app.get("/auth-callback", async (req, res) => {
   res.cookie("user_session", JSON.stringify(data.profile), {
     httpOnly: true,
     maxAge: data.sessionDurationMs,
+    sameSite: "lax",
   });
 
   // Clear auth state
@@ -378,45 +518,118 @@ app.get("/dashboard", (req, res) => {
   if (!session) return res.redirect("/");
 
   const user = JSON.parse(session);
-  res.send(`Welcome, ${user.username}!`);
+  res.send(`<h1>Welcome, ${user.username}!</h1>`);
 });
+
+// Logout
+app.post("/api/logout", (req, res) => {
+  res.clearCookie("user_session");
+  res.json({ success: true });
+});
+
+app.listen(3001);
 ```
+
+### Vanilla JavaScript (Static Site)
+
+For static sites, you'll need a small backend for the callback. Here's the client-side part:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My Site</title>
+  </head>
+  <body>
+    <button id="login">Login with Alt Auth</button>
+
+    <script>
+      const ALT_AUTH_URL = "https://alt-osdg.vercel.app";
+
+      document.getElementById("login").onclick = () => {
+        const nonce = crypto.randomUUID();
+        document.cookie = `alt_auth_state=${JSON.stringify({
+          nonce,
+          redirectUrl: "/dashboard.html",
+        })}; path=/; SameSite=Lax`;
+
+        window.location.href = `${ALT_AUTH_URL}/login`;
+      };
+    </script>
+  </body>
+</html>
+```
+
+---
 
 ## Troubleshooting
 
-### "Invalid callback" error
+### "invalid_callback" Error
 
-- Make sure you're setting the `alt_auth_state` cookie before redirecting
+**Cause:** The `alt_auth_state` cookie is missing when Alt Auth redirects back.
+
+**Solutions:**
+
+- Ensure you set `SameSite=Lax` (not `Strict`)
 - Check that cookies are enabled in the browser
-- Verify the cookie path is set to `/`
+- Verify the cookie `path` is set to `/`
+- Make sure you're not in incognito mode with cookies blocked
 
-### "Auth failed" error
+### "auth_failed" Error
 
-- Check that your origin matches what Alt Auth captured
-- Ensure you're calling verify-claim from the server, not client
-- Verify the claim hasn't expired (5 minute window)
+**Cause:** The claim verification failed.
 
-### OTP not received
+**Solutions:**
+
+- Ensure the `origin` in your verify-claim request matches your actual origin
+- Check that you're calling verify-claim from the server, not client
+- Verify the claim hasn't expired (5-minute window)
+- Check Alt Auth server logs for more details
+
+### Redirect Not Working
+
+**Cause:** Using `redirect()` with cookie modifications in a page component.
+
+**Solution:** Use a Route Handler (`route.ts`) with `NextResponse.redirect()` instead of a page component with `redirect()`.
+
+### Session Cookie Not Being Set
+
+**Cause:** The cookie might be set but not persisting.
+
+**Solutions:**
+
+- Use `sameSite: "lax"` for the session cookie
+- In production, ensure `secure: true` and you're using HTTPS
+- Check that `path: "/"` is set
+
+### Logout Not Working
+
+**Cause:** Trying to delete an httpOnly cookie from client-side JavaScript.
+
+**Solution:** Create a server-side logout API route that clears the cookie.
+
+### OTP Not Received
+
+**Solutions:**
 
 - Check spam/junk folder
-- Verify SMTP settings on Alt Auth are correct
-- Ensure the email address is valid
+- Verify the email address is correct
+- Wait a minute and try again (rate limiting)
+- Contact Alt Auth administrator to check SMTP settings
 
-### Session not persisting
+---
 
-- For httpOnly cookies, you need a server-side logout endpoint
-- Check that cookie `sameSite` and `secure` settings are appropriate for your environment
+## Live Demo
 
-## Example Implementation
+Alt Auth is deployed at: **https://alt-osdg.vercel.app**
 
-A complete working example is available in the Alt Auth repository under `example-site/`. To run it:
+A complete working example is available in the Alt Auth repository:
 
 ```bash
-# Clone the repo
 git clone https://github.com/unignoramus11/alt.git
 cd alt
 
-# Install and run Alt Auth
+# Run Alt Auth locally
 npm install
 npm run dev
 
@@ -428,3 +641,10 @@ npm run dev
 
 - Alt Auth: http://localhost:3000
 - Example Site: http://localhost:3001
+
+Or test with the deployed version by setting:
+
+```bash
+# example-site/.env.local
+NEXT_PUBLIC_ALT_AUTH_URL=https://alt-osdg.vercel.app
+```

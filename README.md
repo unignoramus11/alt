@@ -182,6 +182,23 @@ cd example-site && npm run dev
 
 Visit http://localhost:3001 to test the full flow.
 
+### Testing with Deployed Alt Auth
+
+To test against the live deployment:
+
+```bash
+cd example-site
+
+# Create .env.local with deployed URL
+echo "NEXT_PUBLIC_ALT_AUTH_URL=https://alt-osdg.vercel.app" > .env.local
+
+npm run dev
+```
+
+## Live Demo
+
+**Alt Auth is live at:** https://alt-osdg.vercel.app
+
 ## Database Collections
 
 | Collection      | Purpose                                |
