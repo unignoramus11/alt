@@ -156,7 +156,7 @@ alt/
 
 2. **One-Time Tokens** - Claim tokens can only be used once. After verification, the auth request is deleted from the database.
 
-3. **Same-Site Cookies** - External sites store their nonce in a `SameSite=Strict` cookie, ensuring only that origin can read it.
+3. **Same-Site Cookies** - External sites store their nonce in a `SameSite=Lax` cookie, ensuring only that origin can read it while allowing cross-site redirects.
 
 4. **Server-to-Server Verification** - The claim token is verified server-side, preventing client-side tampering.
 

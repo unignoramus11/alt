@@ -11,7 +11,7 @@ export default function Home() {
     document.cookie = `alt_auth_state=${JSON.stringify({
       nonce,
       redirectUrl,
-    })}; path=/; SameSite=Strict`;
+    })}; path=/; SameSite=Lax`;
 
     // Navigate to Alt Auth
     window.location.href = `${ALT_AUTH_URL}/login`;

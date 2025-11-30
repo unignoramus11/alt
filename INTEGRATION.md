@@ -34,7 +34,7 @@ export default function Home() {
     document.cookie = `alt_auth_state=${JSON.stringify({
       nonce,
       redirectUrl,
-    })}; path=/; SameSite=Strict; Secure`;
+    })}; path=/; SameSite=Lax`;
 
     // Redirect to Alt Auth
     window.location.href = `${ALT_AUTH_URL}/login`;
@@ -278,7 +278,7 @@ Verify a claim token and retrieve user profile. This should be called server-sid
 
 1. **Origin Binding**: When the user is redirected to Alt Auth, the browser sends a `Referer` header. Alt Auth captures this and stores it with the auth request. The claim can only be verified if the origin matches.
 
-2. **Same-Site Cookies**: Your `alt_auth_state` cookie uses `SameSite=Strict`, meaning only your origin can read the nonce. An attacker can't read this value.
+2. **Same-Site Cookies**: Your `alt_auth_state` cookie uses `SameSite=Lax`, meaning only your origin can read the nonce. This allows the cookie to be sent on top-level redirects back from Alt Auth while still preventing CSRF attacks.
 
 3. **One-Time Claims**: Claim tokens are deleted after use. They cannot be replayed.
 
@@ -327,7 +327,7 @@ app.get("/", (req, res) => {
         document.cookie = 'alt_auth_state=' + JSON.stringify({
           nonce,
           redirectUrl: '/dashboard'
-        }) + '; path=/; SameSite=Strict';
+        }) + '; path=/; SameSite=Lax';
         window.location.href = '${ALT_AUTH_URL}/login';
       }
     </script>

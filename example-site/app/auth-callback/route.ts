@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Verify claim with Alt Auth server
+  const origin = request.nextUrl.origin;
   const response = await fetch(`${ALT_AUTH_URL}/api/auth/verify-claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
       requestId: request_id,
       claimToken: claim,
       nonce: state.nonce,
-      origin: "http://localhost:3001",
+      origin,
     }),
   });
 
