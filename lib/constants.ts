@@ -48,7 +48,8 @@ export const BATCHES = [
 ] as const;
 
 // Email validation
-export const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+export const EMAIL_REGEX =
+  /^[A-Za-z0-9._%+-]+@(iiit\.ac\.in|students\.iiit\.ac\.in|research\.iiit\.ac\.in)$/;
 
 // Auth callback path that external sites should implement
 export const AUTH_CALLBACK_PATH = "/auth-callback";
